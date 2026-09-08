@@ -1078,14 +1078,6 @@ async function addCheckboxes() {
                     window.open(`https://ssstiktok.dev/#username=${username}`, '_blank');
                 }
             };
-
-            // Update checkbox data to transformed URL
-            if (cb) {
-                const match = decodedHref.match(/@([^\/ #?]+)/);
-                if (match) {
-                    cb.dataset.href = `https://ssstiktok.dev/#username=${match[1]}`;
-                }
-            }
         }
     }
 }

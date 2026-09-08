@@ -101,6 +101,12 @@
             const next = Array.from(new Set([...current, ...selectedUrls]));
             saveInternalClipboard(next);
             showNotification(`Appended ${selectedUrls.size} items.\nTotal: ${next.length}`, '#4ecdc4');
+            selectedUrls.clear();
+            document.querySelectorAll('a.pro-dl-link').forEach(link => {
+                const cb = link.previousElementSibling;
+                if (cb && cb.type === 'checkbox') cb.checked = false;
+            });
+            updateMultiSelect();
         };
 
         menu.querySelector('#tmk-ss-clear').onclick = (e) => {
@@ -108,6 +114,12 @@
             const next = Array.from(selectedUrls);
             saveInternalClipboard(next);
             showNotification(`Cleared and saved ${selectedUrls.size} items.`, '#00f2ea');
+            selectedUrls.clear();
+            document.querySelectorAll('a.pro-dl-link').forEach(link => {
+                const cb = link.previousElementSibling;
+                if (cb && cb.type === 'checkbox') cb.checked = false;
+            });
+            updateMultiSelect();
         };
     }
 

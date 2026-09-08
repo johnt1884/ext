@@ -56,8 +56,47 @@
         navigator.clipboard.writeText(list.join('\n')).catch(() => {});
     }
 
-    // ------------------ Selection State ------------------
+    // ------------------ Selection State & Persistence ------------------
     let selectedLinks = new Set();
+    let isSelectionsLoaded = false;
+
+    function getStorageKey() {
+        return "tiktok_selected_videos:" + location.pathname;
+    }
+
+    async function savePersistentSelections() {
+        if (!isContextValid()) return;
+        const key = getStorageKey();
+        try {
+            await chrome.storage.local.set({ [key]: Array.from(selectedLinks) });
+        } catch (e) {
+            console.warn("TikTok UI: Failed to save persistent selections", e);
+        }
+    }
+
+    async function loadPersistentSelections() {
+        if (!isContextValid()) return;
+        const key = getStorageKey();
+        try {
+            const res = await chrome.storage.local.get(key);
+            const saved = res[key] || [];
+            selectedLinks = new Set(saved);
+            isSelectionsLoaded = true;
+        } catch (e) {
+            console.warn("TikTok UI: Failed to load persistent selections", e);
+            isSelectionsLoaded = true;
+        }
+    }
+
+    async function clearPersistentSelections() {
+        if (!isContextValid()) return;
+        const key = getStorageKey();
+        try {
+            await chrome.storage.local.remove(key);
+        } catch (e) {
+            console.warn("TikTok UI: Failed to clear persistent selections", e);
+        }
+    }
 
     function updateMultiSelectMenu() {
         let menu = document.getElementById('tmk-multi-select-menu');
@@ -87,34 +126,47 @@
             <a href="#" id="tmk-deselect-all" style="color:#ff6b6b; text-decoration:none;">Deselect All</a>
         `;
 
-        menu.querySelector('#tmk-copy-append').onclick = (e) => {
+        menu.querySelector('#tmk-copy-append').onclick = async (e) => {
             e.preventDefault();
             const current = getInternalClipboard();
             const next = Array.from(new Set([...current, ...selectedLinks]));
             saveInternalClipboard(next);
             showNotification(`Appended ${selectedLinks.size} links.\nTotal: ${next.length}`, '#4ecdc4');
+            selectedLinks.clear();
+            await clearPersistentSelections();
+            document.querySelectorAll('.tmk-video-checkbox, .tmk-row-checkbox').forEach(cb => cb.checked = false);
+            updateMultiSelectMenu();
         };
 
-        menu.querySelector('#tmk-copy-clear').onclick = (e) => {
+        menu.querySelector('#tmk-copy-clear').onclick = async (e) => {
             e.preventDefault();
             if (confirm('Clear internal clipboard and save these ' + selectedLinks.size + ' links?')) {
                 const next = Array.from(selectedLinks);
                 saveInternalClipboard(next);
                 showNotification(`Cleared and saved ${selectedLinks.size} links.`, '#00f2ea');
+                selectedLinks.clear();
+                await clearPersistentSelections();
+                document.querySelectorAll('.tmk-video-checkbox, .tmk-row-checkbox').forEach(cb => cb.checked = false);
+                updateMultiSelectMenu();
             }
         };
 
-        menu.querySelector('#tmk-deselect-all').onclick = (e) => {
+        menu.querySelector('#tmk-deselect-all').onclick = async (e) => {
             e.preventDefault();
             selectedLinks.clear();
-            document.querySelectorAll('.tmk-video-checkbox').forEach(cb => cb.checked = false);
+            await clearPersistentSelections();
+            document.querySelectorAll('.tmk-video-checkbox, .tmk-row-checkbox').forEach(cb => cb.checked = false);
             updateMultiSelectMenu();
         };
     }
 
     // ------------------ Profile Page Checkboxes ------------------
-    function injectCheckboxes() {
+    async function injectCheckboxes() {
         if (!location.pathname.startsWith('/@') || /\/(video|photo)\//.test(location.pathname)) return;
+
+        if (!isSelectionsLoaded) {
+            await loadPersistentSelections();
+        }
 
         const videoCards = document.querySelectorAll('[data-e2e="user-post-item"]');
         videoCards.forEach(card => {
@@ -136,9 +188,14 @@
                 transform: 'scale(2)', cursor: 'pointer'
             });
 
-            cb.addEventListener('change', (e) => {
+            if (selectedLinks.has(videoUrl)) {
+                cb.checked = true;
+            }
+
+            cb.addEventListener('change', async (e) => {
                 if (cb.checked) selectedLinks.add(videoUrl);
                 else selectedLinks.delete(videoUrl);
+                await savePersistentSelections();
                 updateMultiSelectMenu();
             });
 
@@ -157,7 +214,7 @@
                 transform: 'scale(2)', cursor: 'pointer'
             });
 
-            rowCb.addEventListener('change', () => {
+            rowCb.addEventListener('change', async () => {
                 const rect = card.getBoundingClientRect();
                 const currentTop = rect.top + window.scrollY;
                 
@@ -180,12 +237,15 @@
                         if (innerRowCb) innerRowCb.checked = rowCb.checked;
                     }
                 });
+                await savePersistentSelections();
                 updateMultiSelectMenu();
             });
 
             rowCb.onclick = (e) => e.stopPropagation();
             card.appendChild(rowCb);
         });
+
+        updateMultiSelectMenu();
     }
 
     // ------------------ Video Page Icon ------------------
@@ -414,12 +474,13 @@
 
     // Reset selection if handle changes (SPA navigation)
     let lastHandle = null;
-    setInterval(() => {
+    setInterval(async () => {
         const match = location.pathname.match(/^\/(@[^/]+)/);
         const currentHandle = match ? match[1] : null;
         if (currentHandle !== lastHandle) {
             lastHandle = currentHandle;
-            selectedLinks.clear();
+            isSelectionsLoaded = false;
+            await loadPersistentSelections();
             updateMultiSelectMenu();
         }
     }, 1000);

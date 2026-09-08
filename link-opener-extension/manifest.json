@@ -3,7 +3,7 @@
   "name": "Link Batch Opener",
   "version": "1.4",
   "permissions": ["tabs", "scripting", "storage"],
-  "host_permissions": ["file:///*", "https://www.tiktok.com/*"],
+  "host_permissions": ["file:///*", "https://www.tiktok.com/*", "https://ssstiktok.dev/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -19,7 +19,7 @@
     },
     {
       "matches": ["https://ssstiktok.dev/*"],
-      "js": ["ssstiktok_handler.js"]
+      "js": ["ssstiktok_handler.js", "stagger_nav.js"]
     }
   ]
 }
