@@ -139,14 +139,30 @@
             }
         }
 
-        // Poll for selection state since we can't easily listen to changes in another script's injected checkboxes
+        function getSelectedVideoUrls() {
+            const selectedCbs = document.querySelectorAll('.tmk-custom-checkbox:checked, .tmk-video-checkbox:checked, .tmk-ssstiktok-checkbox:checked');
+            const urls = Array.from(selectedCbs).map(cb => {
+                if (cb.classList.contains('tmk-ssstiktok-checkbox')) {
+                    return cb.dataset.url || null;
+                } else if (cb.classList.contains('tmk-video-checkbox')) {
+                    const card = cb.closest('[data-e2e="user-post-item"]');
+                    const a = card ? card.querySelector('a[href]') : null;
+                    return a ? a.href.split('?')[0] : null;
+                } else {
+                    const a = cb.closest('a') || cb.parentElement.querySelector('a');
+                    return a ? a.href.split('?')[0] : null;
+                }
+            }).filter(Boolean);
+            return Array.from(new Set(urls));
+        }
+
+        // Poll for selection state
         const statePoll = setInterval(() => {
             if (!isContextValid()) {
                 clearInterval(statePoll);
                 return;
             }
-            // Update: check both userscript and extension checkboxes
-            const anySelected = document.querySelector('.tmk-custom-checkbox:checked, .tmk-video-checkbox:checked');
+            const anySelected = document.querySelector('.tmk-custom-checkbox:checked, .tmk-video-checkbox:checked, .tmk-ssstiktok-checkbox:checked');
             if (anySelected) {
                 btn.style.color = "yellow";
                 btn.style.borderColor = "yellow";
@@ -158,46 +174,38 @@
             }
         }, 500);
 
-        btn.onclick = () => {
-            if (!isContextValid()) return;
-            const selected = document.querySelectorAll(".tmk-custom-checkbox:checked, .tmk-video-checkbox:checked");
-            if (selected.length > 0) {
-                const urls = Array.from(selected).map(cb => {
-                    // tmk-video-checkbox in extension is attached to the card, which should have a link inside.
-                    // tmk-custom-checkbox in userscript is inside the A tag.
-                    let url = null;
-                    if (cb.classList.contains('tmk-video-checkbox')) {
-                        const card = cb.closest('[data-e2e="user-post-item"]');
-                        const a = card ? card.querySelector('a[href]') : null;
-                        url = a ? a.href.split('?')[0] : null;
-                    } else {
-                        const a = cb.closest('a') || cb.parentElement.querySelector('a');
-                        url = a ? a.href.split('?')[0] : null;
-                    }
-                    return url;
-                }).filter(Boolean);
+        async function appendUrlsToMemory(urls) {
+            if (!urls || urls.length === 0) return;
+            try {
+                const CLIPBOARD_KEY = 'tmk_internal_clipboard';
+                const raw = localStorage.getItem(CLIPBOARD_KEY);
+                const currentItems = raw ? JSON.parse(raw) : [];
+                const merged = Array.from(new Set([...currentItems, ...urls]));
+                localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(merged));
+                navigator.clipboard.writeText(merged.join('\n')).catch(() => {});
 
-                if (urls.length > 0) {
-                    try {
-                        const CLIPBOARD_KEY = 'tmk_internal_clipboard';
-                        const raw = localStorage.getItem(CLIPBOARD_KEY);
-                        const currentItems = raw ? JSON.parse(raw) : [];
-                        const newSet = new Set([...currentItems, ...urls]);
-                        const merged = Array.from(newSet);
-                        localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(merged));
-
-                        navigator.clipboard.writeText(merged.join('\n')).catch(() => {});
-
-                        const appendedCount = urls.length;
-                        const totalCount = merged.length;
-                        localStorage.setItem('stagger_append_notify', JSON.stringify({
-                            appended: appendedCount,
-                            total: totalCount
-                        }));
-                    } catch (e) {
-                        console.error("Stagger Nav: Failed to append to clipboard", e);
-                    }
+                if (isContextValid()) {
+                    await chrome.storage.local.set({
+                        'stagger_append_notify': {
+                            appended: urls.length,
+                            total: merged.length
+                        }
+                    });
                 }
+                localStorage.setItem('stagger_append_notify', JSON.stringify({
+                    appended: urls.length,
+                    total: merged.length
+                }));
+            } catch (e) {
+                console.error("Stagger Nav: Failed to append to clipboard", e);
+            }
+        }
+
+        btn.onclick = async () => {
+            if (!isContextValid()) return;
+            const urls = getSelectedVideoUrls();
+            if (urls.length > 0) {
+                await appendUrlsToMemory(urls);
             }
             if (isContextValid()) {
                 chrome.runtime.sendMessage({ type: "NEXT_STAGGERED" });
@@ -323,32 +331,52 @@
 
         document.body.appendChild(fastBtn);
 
-        // Second yellow >> button (only if new videos present)
-        const hasNewVideos = async () => {
-            if (!isContextValid()) return false;
-            // 1. Check userscript element
-            const newCountElement = document.getElementById('tt-thumb-meta__new-count');
-            if (newCountElement && parseInt(newCountElement.textContent) > 0) return true;
+        async function getNewVideoUrls() {
+            if (!isContextValid()) return [];
+            let urls = [];
 
-            // 2. Check baselines directly (robust fallback)
-            const res = await chrome.storage.local.get("staggered_scan_baselines");
-            const baselines = res.staggered_scan_baselines || {};
-            const handleMatch = location.pathname.match(/^\/(@[^/]+)/);
-            const handle = handleMatch ? handleMatch[1] : null;
-            const baseline = handle ? (baselines[`tiktok_last_post:${handle}`] || 0) : Infinity;
+            // 1. Userscript new elements
+            const newMetas = document.querySelectorAll('.tt-thumb-meta__meta--new');
+            newMetas.forEach(meta => {
+                const host = meta.closest('.tt-thumb-meta__host');
+                const a = host ? host.querySelector('a[href]') : null;
+                if (a) urls.push(a.href.split('?')[0]);
+            });
 
-            const links = document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]');
-            for (const a of links) {
-                const postIdMatch = a.href.match(/\/(?:video|photo)\/(\d{10,})/);
-                if (postIdMatch) {
-                    try {
-                        const ts = Number(BigInt(postIdMatch[1]) >> 32n) * 1000;
-                        if (ts > baseline) return true;
-                    } catch(e) {}
+            // 2. ssstiktok yellow outlined links
+            document.querySelectorAll('a.pro-dl-link').forEach(link => {
+                if (link.style.outline && link.style.outline.includes('yellow')) {
+                    const fileName = link.getAttribute('data-name') || '';
+                    const idMatch = fileName.match(/_(\d+)\.mp4/);
+                    if (idMatch) {
+                        urls.push(`https://www.tiktok.com/@user/video/${idMatch[1]}`);
+                    }
+                }
+            });
+
+            // 3. Direct baselines check fallback
+            if (urls.length === 0) {
+                const res = await chrome.storage.local.get("staggered_scan_baselines");
+                const baselines = res.staggered_scan_baselines || {};
+                const handleMatch = location.pathname.match(/^\/(@[^/]+)/);
+                const handle = handleMatch ? handleMatch[1] : null;
+                const baseline = handle ? (baselines[`tiktok_last_post:${handle}`] || 0) : Infinity;
+
+                const links = document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]');
+                for (const a of links) {
+                    const postIdMatch = a.href.match(/\/(?:video|photo)\/(\d{10,})/);
+                    if (postIdMatch) {
+                        try {
+                            const ts = Number(BigInt(postIdMatch[1]) >> 32n) * 1000;
+                            if (ts > baseline) {
+                                urls.push(a.href.split('?')[0]);
+                            }
+                        } catch(e) {}
+                    }
                 }
             }
-            return false;
-        };
+            return Array.from(new Set(urls));
+        }
 
         const createNewFwdBtn = () => {
             const btnNew = document.createElement("button");
@@ -380,31 +408,10 @@
             btnNew.onmouseover = () => btnNew.style.opacity = "1";
             btnNew.onmouseout = () => btnNew.style.opacity = "0.7";
 
-            btnNew.onclick = () => {
-                const newMetas = document.querySelectorAll('.tt-thumb-meta__meta--new');
-                const urls = Array.from(newMetas).map(meta => {
-                    const host = meta.closest('.tt-thumb-meta__host');
-                    const a = host ? host.querySelector('a[href]') : null;
-                    return a ? a.href.split('?')[0] : null;
-                }).filter(Boolean);
-
+            btnNew.onclick = async () => {
+                const urls = await getNewVideoUrls();
                 if (urls.length > 0) {
-                    try {
-                        if (!isContextValid()) return;
-                        const CLIPBOARD_KEY = 'tmk_internal_clipboard';
-                        const raw = localStorage.getItem(CLIPBOARD_KEY);
-                        const currentItems = raw ? JSON.parse(raw) : [];
-                        const newSet = new Set([...currentItems, ...urls]);
-                        const merged = Array.from(newSet);
-                        localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(merged));
-
-                        navigator.clipboard.writeText(merged.join('\n')).catch(() => {});
-
-                        localStorage.setItem('stagger_append_notify', JSON.stringify({
-                            appended: urls.length,
-                            total: merged.length
-                        }));
-                    } catch (e) {}
+                    await appendUrlsToMemory(urls);
                 }
                 if (isContextValid()) {
                     chrome.runtime.sendMessage({ type: "NEXT_STAGGERED" });
@@ -412,6 +419,11 @@
             };
 
             document.body.appendChild(btnNew);
+        };
+
+        const hasNewVideos = async () => {
+            const urls = await getNewVideoUrls();
+            return urls.length > 0;
         };
 
         const checkNew = setInterval(async () => {

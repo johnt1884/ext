@@ -1078,6 +1078,10 @@ async function addCheckboxes() {
                     window.open(`https://ssstiktok.dev/#username=${username}`, '_blank');
                 }
             };
+
+            if (cb) {
+                cb.dataset.href = link.href;
+            }
         }
     }
 }

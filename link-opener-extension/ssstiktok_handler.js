@@ -69,6 +69,40 @@
     }
 
     let selectedUrls = new Set();
+    let isSssSelectionsLoaded = false;
+
+    function getSssStorageKey() {
+        return "ssstiktok_selected_videos:" + (currentUsername || location.pathname);
+    }
+
+    async function saveSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            await chrome.storage.local.set({ [key]: Array.from(selectedUrls) });
+        } catch (e) {}
+    }
+
+    async function loadSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            const res = await chrome.storage.local.get(key);
+            const saved = res[key] || [];
+            selectedUrls = new Set(saved);
+            isSssSelectionsLoaded = true;
+        } catch (e) {
+            isSssSelectionsLoaded = true;
+        }
+    }
+
+    async function clearSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            await chrome.storage.local.remove(key);
+        } catch (e) {}
+    }
 
     function updateMultiSelect() {
         let menu = document.getElementById('tmk-ssstiktok-menu');
@@ -95,13 +129,14 @@
             <a href="#" id="tmk-ss-clear" style="color:#00f2ea; text-decoration:none;">Copy Selected (Clear)</a>
         `;
 
-        menu.querySelector('#tmk-ss-append').onclick = (e) => {
+        menu.querySelector('#tmk-ss-append').onclick = async (e) => {
             e.preventDefault();
             const current = getInternalClipboard();
             const next = Array.from(new Set([...current, ...selectedUrls]));
             saveInternalClipboard(next);
             showNotification(`Appended ${selectedUrls.size} items.\nTotal: ${next.length}`, '#4ecdc4');
             selectedUrls.clear();
+            await clearSssPersistentSelections();
             document.querySelectorAll('a.pro-dl-link').forEach(link => {
                 const cb = link.previousElementSibling;
                 if (cb && cb.type === 'checkbox') cb.checked = false;
@@ -109,12 +144,13 @@
             updateMultiSelect();
         };
 
-        menu.querySelector('#tmk-ss-clear').onclick = (e) => {
+        menu.querySelector('#tmk-ss-clear').onclick = async (e) => {
             e.preventDefault();
             const next = Array.from(selectedUrls);
             saveInternalClipboard(next);
             showNotification(`Cleared and saved ${selectedUrls.size} items.`, '#00f2ea');
             selectedUrls.clear();
+            await clearSssPersistentSelections();
             document.querySelectorAll('a.pro-dl-link').forEach(link => {
                 const cb = link.previousElementSibling;
                 if (cb && cb.type === 'checkbox') cb.checked = false;
@@ -137,6 +173,10 @@
             if (input && input.value && !input.value.includes('http')) {
                 username = input.value.trim();
             }
+        }
+
+        if (!isSssSelectionsLoaded) {
+            await loadSssPersistentSelections();
         }
 
         const res = await chrome.storage.local.get(SEEN_IDS_KEY);
@@ -164,13 +204,20 @@
 
             const cb = document.createElement('input');
             cb.type = 'checkbox';
+            cb.className = 'tmk-ssstiktok-checkbox';
+            cb.dataset.url = finalUrl;
             cb.style.marginRight = '8px';
             cb.style.transform = 'scale(1.5)';
             cb.style.verticalAlign = 'middle';
+
+            if (selectedUrls.has(finalUrl)) {
+                cb.checked = true;
+            }
             
-            cb.onchange = () => {
+            cb.onchange = async () => {
                 if (cb.checked) selectedUrls.add(finalUrl);
                 else selectedUrls.delete(finalUrl);
+                await saveSssPersistentSelections();
                 updateMultiSelect();
             };
 
@@ -180,6 +227,8 @@
         if (updatedSeen) {
             chrome.storage.local.set({ [SEEN_IDS_KEY]: Array.from(seenIds) });
         }
+
+        updateMultiSelect();
     }
 
     handleAutoSearch();

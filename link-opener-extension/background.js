@@ -121,7 +121,6 @@ async function startStaggered(urls, openerTabId) {
 }
 
 async function nextStaggered(senderTabId) {
-    // Reload state in case background script was suspended
     const data = await chrome.storage.local.get(['staggeredList', 'staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
     staggeredList = data.staggeredList || data.staggeredQueue || [];
     currentStaggeredTabId = data.currentStaggeredTabId;
@@ -129,28 +128,21 @@ async function nextStaggered(senderTabId) {
     let total = data.staggeredTotal || staggeredList.length;
     let currentIndex = data.staggeredCurrentIndex || 1;
 
-    // Reliability: Close the tab that triggered the next (usually currentStaggeredTabId)
-    // If senderTabId is provided (automatic mode from content script), we close that specific tab.
     const tabToClose = senderTabId || currentStaggeredTabId;
 
-    let wasActive = false;
+    let wasActive = true;
     if (tabToClose) {
         try {
             const tab = await chrome.tabs.get(tabToClose);
             wasActive = tab.active;
-            await chrome.tabs.remove(tabToClose);
-        } catch (e) {
-            console.warn("Could not remove tab:", e);
-        }
+        } catch (e) {}
     }
 
     if (currentIndex < total) {
         currentIndex++;
         const nextUrl = staggeredList[currentIndex - 1];
-        // If the user was looking at the tab we just closed, they likely want to stay in the flow.
-        // Otherwise, open in background.
-        const tab = await chrome.tabs.create({ url: nextUrl, active: wasActive });
-        currentStaggeredTabId = tab.id;
+        const newTab = await chrome.tabs.create({ url: nextUrl, active: wasActive });
+        currentStaggeredTabId = newTab.id;
     } else {
         currentStaggeredTabId = null;
         if (staggeredOpenerTabId) {
@@ -158,7 +150,15 @@ async function nextStaggered(senderTabId) {
         }
     }
 
-    await chrome.storage.local.set({ 
+    if (tabToClose) {
+        try {
+            await chrome.tabs.remove(tabToClose);
+        } catch (e) {
+            console.warn("Could not remove tab:", e);
+        }
+    }
+
+    await chrome.storage.local.set({
         staggeredList,
         currentStaggeredTabId,
         staggeredCurrentIndex: currentIndex
@@ -178,21 +178,26 @@ async function prevStaggered(senderTabId) {
 
     const tabToClose = senderTabId || currentStaggeredTabId;
 
-    let wasActive = false;
+    let wasActive = true;
     if (tabToClose) {
         try {
             const tab = await chrome.tabs.get(tabToClose);
             wasActive = tab.active;
+        } catch (e) {}
+    }
+
+    currentIndex--;
+    const prevUrl = staggeredList[currentIndex - 1];
+    const newTab = await chrome.tabs.create({ url: prevUrl, active: wasActive });
+    currentStaggeredTabId = newTab.id;
+
+    if (tabToClose) {
+        try {
             await chrome.tabs.remove(tabToClose);
         } catch (e) {
             console.warn("Could not remove tab:", e);
         }
     }
-
-    currentIndex--;
-    const prevUrl = staggeredList[currentIndex - 1];
-    const tab = await chrome.tabs.create({ url: prevUrl, active: wasActive });
-    currentStaggeredTabId = tab.id;
 
     await chrome.storage.local.set({
         staggeredList,
@@ -230,9 +235,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         });
     } else if (message.type === "CHECK_STAGGERED") {
-        chrome.storage.local.get(['currentStaggeredTabId', 'staggeredTotal', 'staggeredCurrentIndex']).then(data => {
+        chrome.storage.local.get(['currentStaggeredTabId', 'staggeredTotal', 'staggeredCurrentIndex', 'staggeredList']).then(data => {
+            // Check if sender tab matches currentStaggeredTabId OR if current tab URL is in staggeredList
+            const tabUrl = sender.tab?.url ? transformSpecialUrl(sender.tab.url) : null;
+            const list = data.staggeredList || [];
+            const isMatch = sender.tab && (sender.tab.id === data.currentStaggeredTabId || (tabUrl && list.includes(tabUrl)));
             sendResponse({
-                isStaggered: sender.tab && sender.tab.id === data.currentStaggeredTabId,
+                isStaggered: isMatch,
                 total: data.staggeredTotal,
                 currentIndex: data.staggeredCurrentIndex
             });
