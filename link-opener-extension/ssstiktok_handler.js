@@ -70,24 +70,14 @@
 
             if (input && btn) {
                 clearInterval(searchInterval);
-                try {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                    nativeInputValueSetter.call(input, currentUsername);
-                } catch (e) {
-                    input.value = currentUsername;
-                }
+                input.value = currentUsername;
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
 
                 setTimeout(() => {
-                    if (form && typeof form.requestSubmit === 'function') {
-                        try { form.requestSubmit(btn); } catch(e) { btn.click(); }
-                    } else {
-                        btn.click();
-                    }
-                }, 300);
-            } else if (attempts > 100) {
+                    btn.click();
+                }, 200);
+            } else if (attempts > 50) {
                 clearInterval(searchInterval);
             }
         }, 300);
