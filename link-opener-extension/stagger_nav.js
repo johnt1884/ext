@@ -534,9 +534,9 @@
                     return;
                 }
 
-                // 2. Direct scraping fallback to ensure robustness
-                const links = document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]');
+                // 2. Direct scraping fallback & ssstiktok yellow outline detection
                 let foundNew = false;
+                const links = document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]');
                 for (const a of links) {
                     const postIdMatch = a.href.match(/\/(?:video|photo)\/(\d{10,})/);
                     if (postIdMatch) {
@@ -550,8 +550,16 @@
                     }
                 }
 
+                // Check ssstiktok.dev yellow outlined download links
+                if (!foundNew) {
+                    const yellowDlLinks = document.querySelectorAll('a.pro-dl-link[style*="yellow"]');
+                    if (yellowDlLinks.length > 0) {
+                        foundNew = true;
+                    }
+                }
+
                 if (foundNew) {
-                    console.log("Staggered Navigation: New videos found via direct scraping! Stopping automation.");
+                    console.log("Staggered Navigation: New videos found! Stopping automation.");
                     clearInterval(pollInterval);
                     if (isContextValid()) {
                         chrome.runtime.sendMessage({ type: "PLAY_SOUND", sound: "new_videos" });
