@@ -108,10 +108,10 @@ async function startStaggered(urls, openerTabId) {
     staggeredOpenerTabId = openerTabId;
     const nextUrl = staggeredList[0];
     
-    const tab = await chrome.tabs.create({ url: nextUrl, active: false });
+    const tab = await chrome.tabs.create({ url: nextUrl, active: true });
     currentStaggeredTabId = tab.id;
     
-    // Save state in case background is suspended
+    // Save state in storage before completing
     await chrome.storage.local.set({ 
         staggeredList,
         currentStaggeredTabId,
@@ -123,9 +123,9 @@ async function startStaggered(urls, openerTabId) {
 
 async function nextStaggered(senderTabId) {
     const data = await chrome.storage.local.get(['staggeredList', 'staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
-    staggeredList = data.staggeredList || data.staggeredQueue || [];
-    currentStaggeredTabId = data.currentStaggeredTabId;
-    staggeredOpenerTabId = data.staggeredOpenerTabId;
+    staggeredList = data.staggeredList || data.staggeredQueue || staggeredList || [];
+    currentStaggeredTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+    staggeredOpenerTabId = data.staggeredOpenerTabId || staggeredOpenerTabId;
     let total = data.staggeredTotal || staggeredList.length;
     let currentIndex = data.staggeredCurrentIndex || 1;
 
@@ -151,6 +151,12 @@ async function nextStaggered(senderTabId) {
         }
     }
 
+    await chrome.storage.local.set({
+        staggeredList,
+        currentStaggeredTabId,
+        staggeredCurrentIndex: currentIndex
+    });
+
     if (tabToClose) {
         try {
             await chrome.tabs.remove(tabToClose);
@@ -158,19 +164,13 @@ async function nextStaggered(senderTabId) {
             console.warn("Could not remove tab:", e);
         }
     }
-
-    await chrome.storage.local.set({
-        staggeredList,
-        currentStaggeredTabId,
-        staggeredCurrentIndex: currentIndex
-    });
 }
 
 async function prevStaggered(senderTabId) {
     const data = await chrome.storage.local.get(['staggeredList', 'staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
-    staggeredList = data.staggeredList || data.staggeredQueue || [];
-    currentStaggeredTabId = data.currentStaggeredTabId;
-    staggeredOpenerTabId = data.staggeredOpenerTabId;
+    staggeredList = data.staggeredList || data.staggeredQueue || staggeredList || [];
+    currentStaggeredTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+    staggeredOpenerTabId = data.staggeredOpenerTabId || staggeredOpenerTabId;
     let currentIndex = data.staggeredCurrentIndex || 1;
 
     if (currentIndex <= 1) {
@@ -192,6 +192,12 @@ async function prevStaggered(senderTabId) {
     const newTab = await chrome.tabs.create({ url: prevUrl, active: wasActive });
     currentStaggeredTabId = newTab.id;
 
+    await chrome.storage.local.set({
+        staggeredList,
+        currentStaggeredTabId,
+        staggeredCurrentIndex: currentIndex
+    });
+
     if (tabToClose) {
         try {
             await chrome.tabs.remove(tabToClose);
@@ -199,12 +205,6 @@ async function prevStaggered(senderTabId) {
             console.warn("Could not remove tab:", e);
         }
     }
-
-    await chrome.storage.local.set({
-        staggeredList,
-        currentStaggeredTabId,
-        staggeredCurrentIndex: currentIndex
-    });
 }
 
 // -----------------------------

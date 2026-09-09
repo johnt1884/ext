@@ -458,10 +458,14 @@
 
     let response;
     if (isContextValid()) {
-        try {
-            response = await chrome.runtime.sendMessage({ type: "CHECK_STAGGERED" });
-        } catch (e) {
-            console.warn("Stagger Nav: Failed to send initial CHECK_STAGGERED message", e);
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                response = await chrome.runtime.sendMessage({ type: "CHECK_STAGGERED" });
+                if (response && response.isStaggered) break;
+            } catch (e) {
+                console.warn("Stagger Nav: Failed to send CHECK_STAGGERED message attempt " + attempt, e);
+            }
+            await new Promise(r => setTimeout(r, 500));
         }
     }
     

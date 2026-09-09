@@ -78,7 +78,11 @@
                     history.replaceState(null, null, location.pathname + location.search);
                 } catch(e) {}
                 setTimeout(() => {
-                    btn.click();
+                    if (form && typeof form.requestSubmit === 'function') {
+                        try { form.requestSubmit(btn); } catch(e) { btn.click(); }
+                    } else {
+                        btn.click();
+                    }
                 }, 300);
             } else if (attempts > 30) {
                 clearInterval(searchInterval);
