@@ -237,14 +237,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
     } else if (message.type === "CHECK_STAGGERED") {
         chrome.storage.local.get(['currentStaggeredTabId', 'staggeredTotal', 'staggeredCurrentIndex', 'staggeredList']).then(data => {
-            // Check if sender tab matches currentStaggeredTabId OR if current tab URL is in staggeredList
+            const activeTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+            const activeTotal = data.staggeredTotal || staggeredList.length;
+            const activeIndex = data.staggeredCurrentIndex || 1;
+            const activeList = data.staggeredList || staggeredList || [];
+
             const tabUrl = sender.tab?.url ? transformSpecialUrl(sender.tab.url) : null;
-            const list = data.staggeredList || [];
-            const isMatch = sender.tab && (sender.tab.id === data.currentStaggeredTabId || (tabUrl && list.includes(tabUrl)));
+            const isMatch = sender.tab && (sender.tab.id === activeTabId || (tabUrl && activeList.includes(tabUrl)));
+
             sendResponse({
-                isStaggered: isMatch,
-                total: data.staggeredTotal,
-                currentIndex: data.staggeredCurrentIndex
+                isStaggered: !!isMatch,
+                total: activeTotal,
+                currentIndex: activeIndex
             });
         });
         return true; // async response

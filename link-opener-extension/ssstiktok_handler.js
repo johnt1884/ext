@@ -70,13 +70,16 @@
 
             if (input && btn) {
                 clearInterval(searchInterval);
-                input.value = currentUsername;
+                try {
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    nativeInputValueSetter.call(input, currentUsername);
+                } catch (e) {
+                    input.value = currentUsername;
+                }
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 input.dispatchEvent(new Event('change', { bubbles: true }));
-                // Clear hash so we don't search again on reload
-                try {
-                    history.replaceState(null, null, location.pathname + location.search);
-                } catch(e) {}
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+
                 setTimeout(() => {
                     if (form && typeof form.requestSubmit === 'function') {
                         try { form.requestSubmit(btn); } catch(e) { btn.click(); }
@@ -84,7 +87,7 @@
                         btn.click();
                     }
                 }, 300);
-            } else if (attempts > 30) {
+            } else if (attempts > 100) {
                 clearInterval(searchInterval);
             }
         }, 300);

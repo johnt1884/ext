@@ -494,6 +494,12 @@
             if (pollInterval) clearInterval(pollInterval);
             if (!isContextValid()) return;
 
+            // Do not auto-advance on ssstiktok.dev so user can use navigation buttons and inspect downloads
+            if (location.hostname.includes("ssstiktok")) {
+                console.log("Staggered Navigation: ssstiktok.dev detected. Auto-advance disabled to keep navigation controls active.");
+                return;
+            }
+
             const res = await chrome.storage.local.get(["automatic_load_enabled", "fast_mode_enabled", "staggered_scan_baselines"]);
             if (!res.automatic_load_enabled) return;
 
