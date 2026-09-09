@@ -50,22 +50,40 @@
     let currentUsername = '';
 
     async function handleAutoSearch() {
-        if (!location.hash.startsWith('#username=')) return;
-        const username = location.hash.split('=')[1];
+        let hash = location.hash;
+        if (!hash.includes('username=')) {
+            const match = location.href.match(/#username=([^&]+)/);
+            if (!match) return;
+            hash = match[0];
+        }
+        const username = hash.split('username=')[1];
         if (!username) return;
 
-        currentUsername = username;
+        currentUsername = decodeURIComponent(username);
 
-        const input = document.getElementById('s_input');
-        const form = document.getElementById('search-form');
-        const btn = form ? form.querySelector('button') : null;
+        let attempts = 0;
+        const searchInterval = setInterval(() => {
+            attempts++;
+            const input = document.getElementById('s_input');
+            const form = document.getElementById('search-form');
+            const btn = form ? form.querySelector('button') : document.getElementById('submit');
 
-        if (input && btn) {
-            input.value = username;
-            // Clear hash so we don't search again on reload
-            history.replaceState(null, null, ' ');
-            btn.click();
-        }
+            if (input && btn) {
+                clearInterval(searchInterval);
+                input.value = currentUsername;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                // Clear hash so we don't search again on reload
+                try {
+                    history.replaceState(null, null, location.pathname + location.search);
+                } catch(e) {}
+                setTimeout(() => {
+                    btn.click();
+                }, 300);
+            } else if (attempts > 30) {
+                clearInterval(searchInterval);
+            }
+        }, 300);
     }
 
     let selectedUrls = new Set();

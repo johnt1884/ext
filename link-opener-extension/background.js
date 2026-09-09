@@ -28,9 +28,10 @@ function rand(min, max) {
 // CORE LOGIC
 // -----------------------------
 function transformSpecialUrl(url) {
+    if (!url) return url;
     const decodedUrl = decodeURIComponent(url);
-    if (decodedUrl.includes(" #")) {
-        const match = decodedUrl.match(/@([^\/ #]+)/);
+    if (decodedUrl.includes(" #") || url.includes("%20#") || url.includes("%20%23") || decodedUrl.includes(" %23")) {
+        const match = decodedUrl.match(/@([^\/ #?%]+)/);
         if (match) {
             const username = match[1];
             return `https://ssstiktok.dev/#username=${username}`;

@@ -557,7 +557,8 @@
 
                 // Continue polling if no videos yet or we haven't given the userscript long enough
                 const pollThreshold = res.fast_mode_enabled ? 1 : 3;
-                if (pollCount >= pollThreshold && document.querySelectorAll('[data-e2e="user-post-item"]').length > 0) {
+                const hasActiveContent = document.querySelectorAll('[data-e2e="user-post-item"], a.pro-dl-link').length > 0;
+                if (pollCount >= pollThreshold && hasActiveContent) {
                     console.log(`Staggered Navigation: No new content found after ${pollThreshold}s of active content. Advancing.`);
                     clearInterval(pollInterval);
                     const delay = res.fast_mode_enabled ? 200 : Math.floor(Math.random() * 2000) + 1000;
