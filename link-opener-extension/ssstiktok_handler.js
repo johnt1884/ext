@@ -50,25 +50,74 @@
     let currentUsername = '';
 
     async function handleAutoSearch() {
-        if (!location.hash.startsWith('#username=')) return;
-        const username = location.hash.split('=')[1];
+        let hash = location.hash;
+        if (!hash.includes('username=')) {
+            const match = location.href.match(/#username=([^&]+)/);
+            if (!match) return;
+            hash = match[0];
+        }
+        const username = hash.split('username=')[1];
         if (!username) return;
 
-        currentUsername = username;
+        currentUsername = decodeURIComponent(username);
 
-        const input = document.getElementById('s_input');
-        const form = document.getElementById('search-form');
-        const btn = form ? form.querySelector('button') : null;
+        let attempts = 0;
+        const searchInterval = setInterval(() => {
+            attempts++;
+            const input = document.getElementById('s_input');
+            const form = document.getElementById('search-form');
+            const btn = form ? form.querySelector('button') : document.getElementById('submit');
 
-        if (input && btn) {
-            input.value = username;
-            // Clear hash so we don't search again on reload
-            history.replaceState(null, null, ' ');
-            btn.click();
-        }
+            if (input && btn) {
+                clearInterval(searchInterval);
+                input.value = currentUsername;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+
+                setTimeout(() => {
+                    btn.click();
+                }, 200);
+            } else if (attempts > 50) {
+                clearInterval(searchInterval);
+            }
+        }, 300);
     }
 
     let selectedUrls = new Set();
+    let isSssSelectionsLoaded = false;
+
+    function getSssStorageKey() {
+        return "ssstiktok_selected_videos:" + (currentUsername || location.pathname);
+    }
+
+    async function saveSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            await chrome.storage.local.set({ [key]: Array.from(selectedUrls) });
+        } catch (e) {}
+    }
+
+    async function loadSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            const res = await chrome.storage.local.get(key);
+            const saved = res[key] || [];
+            selectedUrls = new Set(saved);
+            isSssSelectionsLoaded = true;
+        } catch (e) {
+            isSssSelectionsLoaded = true;
+        }
+    }
+
+    async function clearSssPersistentSelections() {
+        if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return;
+        const key = getSssStorageKey();
+        try {
+            await chrome.storage.local.remove(key);
+        } catch (e) {}
+    }
 
     function updateMultiSelect() {
         let menu = document.getElementById('tmk-ssstiktok-menu');
@@ -95,19 +144,33 @@
             <a href="#" id="tmk-ss-clear" style="color:#00f2ea; text-decoration:none;">Copy Selected (Clear)</a>
         `;
 
-        menu.querySelector('#tmk-ss-append').onclick = (e) => {
+        menu.querySelector('#tmk-ss-append').onclick = async (e) => {
             e.preventDefault();
             const current = getInternalClipboard();
             const next = Array.from(new Set([...current, ...selectedUrls]));
             saveInternalClipboard(next);
             showNotification(`Appended ${selectedUrls.size} items.\nTotal: ${next.length}`, '#4ecdc4');
+            selectedUrls.clear();
+            await clearSssPersistentSelections();
+            document.querySelectorAll('a.pro-dl-link').forEach(link => {
+                const cb = link.previousElementSibling;
+                if (cb && cb.type === 'checkbox') cb.checked = false;
+            });
+            updateMultiSelect();
         };
 
-        menu.querySelector('#tmk-ss-clear').onclick = (e) => {
+        menu.querySelector('#tmk-ss-clear').onclick = async (e) => {
             e.preventDefault();
             const next = Array.from(selectedUrls);
             saveInternalClipboard(next);
             showNotification(`Cleared and saved ${selectedUrls.size} items.`, '#00f2ea');
+            selectedUrls.clear();
+            await clearSssPersistentSelections();
+            document.querySelectorAll('a.pro-dl-link').forEach(link => {
+                const cb = link.previousElementSibling;
+                if (cb && cb.type === 'checkbox') cb.checked = false;
+            });
+            updateMultiSelect();
         };
     }
 
@@ -125,6 +188,10 @@
             if (input && input.value && !input.value.includes('http')) {
                 username = input.value.trim();
             }
+        }
+
+        if (!isSssSelectionsLoaded) {
+            await loadSssPersistentSelections();
         }
 
         const res = await chrome.storage.local.get(SEEN_IDS_KEY);
@@ -152,13 +219,20 @@
 
             const cb = document.createElement('input');
             cb.type = 'checkbox';
+            cb.className = 'tmk-ssstiktok-checkbox';
+            cb.dataset.url = finalUrl;
             cb.style.marginRight = '8px';
             cb.style.transform = 'scale(1.5)';
             cb.style.verticalAlign = 'middle';
+
+            if (selectedUrls.has(finalUrl)) {
+                cb.checked = true;
+            }
             
-            cb.onchange = () => {
+            cb.onchange = async () => {
                 if (cb.checked) selectedUrls.add(finalUrl);
                 else selectedUrls.delete(finalUrl);
+                await saveSssPersistentSelections();
                 updateMultiSelect();
             };
 
@@ -168,6 +242,8 @@
         if (updatedSeen) {
             chrome.storage.local.set({ [SEEN_IDS_KEY]: Array.from(seenIds) });
         }
+
+        updateMultiSelect();
     }
 
     handleAutoSearch();

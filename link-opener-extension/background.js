@@ -28,9 +28,10 @@ function rand(min, max) {
 // CORE LOGIC
 // -----------------------------
 function transformSpecialUrl(url) {
+    if (!url) return url;
     const decodedUrl = decodeURIComponent(url);
-    if (decodedUrl.includes(" #")) {
-        const match = decodedUrl.match(/@([^\/ #]+)/);
+    if (decodedUrl.includes(" #") || url.includes("%20#") || url.includes("%20%23") || decodedUrl.includes(" %23")) {
+        const match = decodedUrl.match(/@([^\/ #?%]+)/);
         if (match) {
             const username = match[1];
             return `https://ssstiktok.dev/#username=${username}`;
@@ -92,7 +93,7 @@ async function openTabsSmart(urls) {
 // -----------------------------
 // STAGGERED LOGIC
 // -----------------------------
-let staggeredQueue = [];
+let staggeredList = [];
 let currentStaggeredTabId = null;
 let staggeredOpenerTabId = null;
 
@@ -103,16 +104,16 @@ async function startStaggered(urls, openerTabId) {
 
     const total = urls.length;
     const currentIndex = 1;
-    staggeredQueue = [...urls];
+    staggeredList = [...urls];
     staggeredOpenerTabId = openerTabId;
-    const nextUrl = staggeredQueue.shift();
+    const nextUrl = staggeredList[0];
     
-    const tab = await chrome.tabs.create({ url: nextUrl, active: false });
+    const tab = await chrome.tabs.create({ url: nextUrl, active: true });
     currentStaggeredTabId = tab.id;
     
-    // Save queue state in case background is suspended (though it's a service worker)
+    // Save state in storage before completing
     await chrome.storage.local.set({ 
-        staggeredQueue, 
+        staggeredList,
         currentStaggeredTabId,
         staggeredOpenerTabId,
         staggeredTotal: total,
@@ -121,36 +122,28 @@ async function startStaggered(urls, openerTabId) {
 }
 
 async function nextStaggered(senderTabId) {
-    // Reload state in case background script was suspended
-    const data = await chrome.storage.local.get(['staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
-    staggeredQueue = data.staggeredQueue || [];
-    currentStaggeredTabId = data.currentStaggeredTabId;
-    staggeredOpenerTabId = data.staggeredOpenerTabId;
-    let total = data.staggeredTotal || 0;
-    let currentIndex = data.staggeredCurrentIndex || 0;
+    const data = await chrome.storage.local.get(['staggeredList', 'staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
+    staggeredList = data.staggeredList || data.staggeredQueue || staggeredList || [];
+    currentStaggeredTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+    staggeredOpenerTabId = data.staggeredOpenerTabId || staggeredOpenerTabId;
+    let total = data.staggeredTotal || staggeredList.length;
+    let currentIndex = data.staggeredCurrentIndex || 1;
 
-    // Reliability: Close the tab that triggered the next (usually currentStaggeredTabId)
-    // If senderTabId is provided (automatic mode from content script), we close that specific tab.
     const tabToClose = senderTabId || currentStaggeredTabId;
 
-    let wasActive = false;
+    let wasActive = true;
     if (tabToClose) {
         try {
             const tab = await chrome.tabs.get(tabToClose);
             wasActive = tab.active;
-            await chrome.tabs.remove(tabToClose);
-        } catch (e) {
-            console.warn("Could not remove tab:", e);
-        }
+        } catch (e) {}
     }
 
-    if (staggeredQueue.length > 0) {
+    if (currentIndex < total) {
         currentIndex++;
-        const nextUrl = staggeredQueue.shift();
-        // If the user was looking at the tab we just closed, they likely want to stay in the flow.
-        // Otherwise, open in background.
-        const tab = await chrome.tabs.create({ url: nextUrl, active: wasActive });
-        currentStaggeredTabId = tab.id;
+        const nextUrl = staggeredList[currentIndex - 1];
+        const newTab = await chrome.tabs.create({ url: nextUrl, active: wasActive });
+        currentStaggeredTabId = newTab.id;
     } else {
         currentStaggeredTabId = null;
         if (staggeredOpenerTabId) {
@@ -158,11 +151,60 @@ async function nextStaggered(senderTabId) {
         }
     }
 
-    await chrome.storage.local.set({ 
-        staggeredQueue, 
+    await chrome.storage.local.set({
+        staggeredList,
         currentStaggeredTabId,
         staggeredCurrentIndex: currentIndex
     });
+
+    if (tabToClose) {
+        try {
+            await chrome.tabs.remove(tabToClose);
+        } catch (e) {
+            console.warn("Could not remove tab:", e);
+        }
+    }
+}
+
+async function prevStaggered(senderTabId) {
+    const data = await chrome.storage.local.get(['staggeredList', 'staggeredQueue', 'currentStaggeredTabId', 'staggeredOpenerTabId', 'staggeredTotal', 'staggeredCurrentIndex']);
+    staggeredList = data.staggeredList || data.staggeredQueue || staggeredList || [];
+    currentStaggeredTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+    staggeredOpenerTabId = data.staggeredOpenerTabId || staggeredOpenerTabId;
+    let currentIndex = data.staggeredCurrentIndex || 1;
+
+    if (currentIndex <= 1) {
+        return; // Already at the first item
+    }
+
+    const tabToClose = senderTabId || currentStaggeredTabId;
+
+    let wasActive = true;
+    if (tabToClose) {
+        try {
+            const tab = await chrome.tabs.get(tabToClose);
+            wasActive = tab.active;
+        } catch (e) {}
+    }
+
+    currentIndex--;
+    const prevUrl = staggeredList[currentIndex - 1];
+    const newTab = await chrome.tabs.create({ url: prevUrl, active: wasActive });
+    currentStaggeredTabId = newTab.id;
+
+    await chrome.storage.local.set({
+        staggeredList,
+        currentStaggeredTabId,
+        staggeredCurrentIndex: currentIndex
+    });
+
+    if (tabToClose) {
+        try {
+            await chrome.tabs.remove(tabToClose);
+        } catch (e) {
+            console.warn("Could not remove tab:", e);
+        }
+    }
 }
 
 // -----------------------------
@@ -185,6 +227,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         startStaggered(message.urls, sender.tab?.id);
     } else if (message.type === "NEXT_STAGGERED") {
         nextStaggered(sender.tab?.id);
+    } else if (message.type === "PREV_STAGGERED") {
+        prevStaggered(sender.tab?.id);
     } else if (message.type === "PLAY_SOUND") {
         chrome.storage.local.get(['staggeredOpenerTabId']).then(data => {
             if (data.staggeredOpenerTabId) {
@@ -192,11 +236,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         });
     } else if (message.type === "CHECK_STAGGERED") {
-        chrome.storage.local.get(['currentStaggeredTabId', 'staggeredTotal', 'staggeredCurrentIndex']).then(data => {
+        chrome.storage.local.get(['currentStaggeredTabId', 'staggeredTotal', 'staggeredCurrentIndex', 'staggeredList']).then(data => {
+            const activeTabId = data.currentStaggeredTabId || currentStaggeredTabId;
+            const activeTotal = data.staggeredTotal || staggeredList.length;
+            const activeIndex = data.staggeredCurrentIndex || 1;
+            const activeList = data.staggeredList || staggeredList || [];
+
+            const tabUrl = sender.tab?.url ? transformSpecialUrl(sender.tab.url) : null;
+            const isMatch = sender.tab && (sender.tab.id === activeTabId || (tabUrl && activeList.includes(tabUrl)));
+
             sendResponse({
-                isStaggered: sender.tab && sender.tab.id === data.currentStaggeredTabId,
-                total: data.staggeredTotal,
-                currentIndex: data.staggeredCurrentIndex
+                isStaggered: !!isMatch,
+                total: activeTotal,
+                currentIndex: activeIndex
             });
         });
         return true; // async response

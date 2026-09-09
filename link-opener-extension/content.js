@@ -1079,12 +1079,8 @@ async function addCheckboxes() {
                 }
             };
 
-            // Update checkbox data to transformed URL
             if (cb) {
-                const match = decodedHref.match(/@([^\/ #?]+)/);
-                if (match) {
-                    cb.dataset.href = `https://ssstiktok.dev/#username=${match[1]}`;
-                }
+                cb.dataset.href = link.href;
             }
         }
     }
